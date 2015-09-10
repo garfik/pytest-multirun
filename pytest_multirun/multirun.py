@@ -1,74 +1,27 @@
 # -*- coding: utf-8 -*-
-from multiprocessing.connection import Listener, Client
 import time
 import json
 import sys
-from _pytest.runner import TestReport
-import py
-import pytest
-from threading import Thread
+import os
 from datetime import datetime
 from subprocess import Popen, PIPE
 from multiprocessing import Pool
+# from _pytest.runner import TestReport
+import py
+import pytest
+from pytest_multirun.wait_thread import WaitThread
+from pytest_multirun.multirun_client import MultiRunClient
 
 
 def _executer(test_cmd, port):
-    env_path = ':'.join(sys.path)
+    # TODO: Для мака и линукса надо :, а для винды надо ;
+    env_path = ';'.join(sys.path)
     cmd = 'py.test ' + test_cmd + ' --multirun-port=' + str(port) + ' --multirun-slave'
-    with Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env={'PATH': env_path}) as proc:
+    with Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env={'PATH': env_path, 'SystemRoot': 'C:\\Windows'}) as proc:
         out, err = proc.communicate()
 
 
-class WaitThread(Thread):
-    def __init__(self, port_number, cb=None):
-        Thread.__init__(self)
-        self.port_number = port_number
-        self.cb = cb
-
-    def run(self):
-        with Listener(('127.0.0.1', self.port_number)) as l:
-            while True:
-                with l.accept() as conn:
-                    msg = conn.recv()
-                    if msg == 'STOP':
-                        break
-                    else:
-                        if self.cb:
-                            self.cb(msg)
-                        else:
-                            print(msg)
-
-    def stop(self):
-        with Client(('127.0.0.1', self.port_number)) as conn:
-            conn.send('STOP')
-
-
-class MultiRunClient(object):
-
-    def __init__(self, port):
-        self.port = int(port)
-
-    def __send(self, msg):
-        try:
-            with Client(('127.0.0.1', self.port)) as conn:
-                conn.send(msg)
-        except ConnectionRefusedError:
-            pass
-
-    def add_to_report(self, nodeid, key, value=None):
-        self.__send({
-            'nodeid': nodeid,
-            'type': 'extra',
-            'key': key,
-            'value': value
-        })
-
-    def send_report(self, rep):
-        self.__send(rep)
-
-
 class MultiRun(object):
-
     PORT_NUMBER = 0
 
     def __init__(self, config):
@@ -102,7 +55,7 @@ class MultiRun(object):
     def message_handler(self, msg):
         # TODO: Сделать поддержку verbose
         # TODO: Сделать поддержку xfail
-        if type(msg) == TestReport:
+        if 'TestReport' in str(type(msg)) and hasattr(msg, 'nodeid'):
             # пришел отчет о тесте
             if msg.nodeid not in self.reports:
                 self.reports[msg.nodeid] = {}
@@ -141,7 +94,7 @@ class MultiRun(object):
         # TODO: Конвертировать в нормальные строки без всяких \u4352
         if type(tr) != dict:
             return None
-        if 'report' not in tr and type(tr['report']) != TestReport:
+        if 'report' not in tr or type(tr['report']) != 'TestReport':
             return None
         res = {
             'nodeid': tr['report'].nodeid,
