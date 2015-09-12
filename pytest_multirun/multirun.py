@@ -13,14 +13,8 @@ from pytest_multirun.multirun_client import MultiRunClient
 
 
 def _executer(test_cmd, port, extra_arguments):
-    # If posix systems, path divider in env var is ':', but in windows is ';'
-    env = {
-        'PATH': ':'.join(sys.path) if os.name.lower() == 'posix' else ';'.join(sys.path),
-        'SYSTEMROOT': os.environ.get('SYSTEMROOT', '')
-    }
-
     cmd = 'py.test ' + test_cmd + ' --multirun-port=' + str(port) + ' --multirun-slave ' + ' '.join(extra_arguments)
-    with Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env=env) as proc:
+    with Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env=os.environ) as proc:
         out, err = proc.communicate()
 
 
