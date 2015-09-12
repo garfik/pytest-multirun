@@ -164,11 +164,20 @@ class MultiRun(object):
         elif type(MAX_PROCESS) == str:
             MAX_PROCESS = int(MAX_PROCESS)
 
-        categories = [group.split(',') for group in config.getini("multirun-list")]
+        categories = []
+        # set categories list in cmd param
+        if config.option.multirun_list:
+            categories = [group.split(',') for group in config.option.multirun_list.split(':') if group]
+
+        if not categories:
+            # well, if cant find in cmd param then search in ini file
+            categories = [group.split(',') for group in config.getini("multirun-list") if group]
+            pass
 
         # check, that we have categories list
         if not categories:
-            # TODO: сообщаем об ошибке
+            # if not, then tell about it and run as usually
+            self.tw.line(s='Cant find any test group list. Please specify it by cmd param or in ini file', red=True)
             return
 
         if MAX_PROCESS < 2 or MAX_PROCESS > 20:

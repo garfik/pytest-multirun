@@ -22,9 +22,8 @@ def pytest_cmdline_main(config):
 
 
 def pytest_addoption(parser):
-    # TODO: multirun-list принимать и как параметр командной строки
     # TODO: сделать поддержку teamcity
-
+    # cmd options
     group = parser.getgroup("Run in multiple processes", "multirun")
     group.addoption(
         '--multirun',
@@ -50,6 +49,15 @@ def pytest_addoption(parser):
         default=False,
         help='Internal option to say pytest, that this session in subprocess'
     )
+    group.addoption(
+        '--multirun-list',
+        action='store',
+        help='List of commands divided by ":" for group and divided by "," for tests in group. '
+             'This param has priority on INI option',
+        default=None
+    )
+
+    # INI options
     parser.addini(
         'multirun-list',
         help='List of commands divided by space for group and divided by "," for tests in group',
