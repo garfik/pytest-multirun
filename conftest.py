@@ -15,6 +15,8 @@ def pytest_configure():
 @pytest.fixture(scope='function')
 def tsf(request, multirun):
     def fin():
+        if not multirun:
+            return
         multirun.add_to_report(request.node.nodeid, 'screenshot', {
             'filename': '123123123123213_dasdasdasd.png',
             'duration': 123123

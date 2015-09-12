@@ -5,6 +5,9 @@ from pytest_multirun.multirun import MultiRun
 
 @pytest.fixture(scope='function')
 def multirun(request):
+    if not hasattr(request.node, 'multirun_client'):
+        return None
+
     return request.node.multirun_client
 
 

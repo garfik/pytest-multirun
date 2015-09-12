@@ -15,7 +15,7 @@ setup(
             'multirun = pytest_multirun.plugin'
         ]
     },
-    #install_requires=['pytest'],
+    install_requires=['pytest==2.7.2', 'pytest-pycharm'],
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',

@@ -6,18 +6,21 @@ import os
 from datetime import datetime
 from subprocess import Popen, PIPE
 from multiprocessing import Pool
-# from _pytest.runner import TestReport
 import py
 import pytest
 from pytest_multirun.wait_thread import WaitThread
 from pytest_multirun.multirun_client import MultiRunClient
 
 
-def _executer(test_cmd, port):
-    # TODO: Для мака и линукса надо :, а для винды надо ;
-    env_path = ';'.join(sys.path)
-    cmd = 'py.test ' + test_cmd + ' --multirun-port=' + str(port) + ' --multirun-slave'
-    with Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env={'PATH': env_path, 'SystemRoot': 'C:\\Windows'}) as proc:
+def _executer(test_cmd, port, extra_arguments):
+    # If posix systems, path divider in env var is ':', but in windows is ';'
+    env = {
+        'PATH': ':'.join(sys.path) if os.name.lower() == 'posix' else ';'.join(sys.path),
+        'SYSTEMROOT': os.environ.get('SYSTEMROOT', '')
+    }
+
+    cmd = 'py.test ' + test_cmd + ' --multirun-port=' + str(port) + ' --multirun-slave ' + ' '.join(extra_arguments)
+    with Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env=env) as proc:
         out, err = proc.communicate()
 
 
@@ -53,30 +56,45 @@ class MultiRun(object):
         return rep
 
     def message_handler(self, msg):
-        # TODO: Сделать поддержку verbose
-        # TODO: Сделать поддержку xfail
+        # TODO: Support xfail\xpassed
         if 'TestReport' in str(type(msg)) and hasattr(msg, 'nodeid'):
             # пришел отчет о тесте
             if msg.nodeid not in self.reports:
                 self.reports[msg.nodeid] = {}
             self.reports[msg.nodeid]['report'] = msg
-            self.tw.write(msg.location[0])
+
+            # if -q not set, then write test name
+            if self.config.option.quiet == 0:
+                if self.config.option.verbose > 0:
+                    self.tw.write(msg.nodeid)
+                else:
+                    self.tw.write(msg.location[0])
 
             if msg.outcome.lower() not in self.stats:
                 self.stats[msg.outcome.lower()] = 0
             self.stats[msg.outcome.lower()] += 1
 
             if msg.outcome.lower() == 'passed':
-                self.tw.line(s=' .', green=True)
+                if self.config.option.verbose > 0:
+                    self.tw.line(s=' PASSED', green=True)
+                elif self.config.option.quiet > 0:
+                    self.tw.write('.', green=True)
+                else:
+                    self.tw.line(s=' .', green=True)
             elif msg.outcome.lower() == 'failed':
-                self.tw.line(s=' F', red=True)
-                if msg.longrepr:
+                if self.config.option.verbose > 0:
+                    self.tw.line(s=' FAILED', red=True)
+                elif self.config.option.quiet > 0:
+                    self.tw.write('F', red=True)
+                else:
+                    self.tw.line(s=' F', red=True)
+                if msg.longrepr and self.config.option.quiet == 0:
                     self.tw.write(msg.longrepr)
                     self.tw.line()
                     self.tw.sep('_')
             else:
                 self.tw.line(' ' + msg.outcome)
-                if msg.longrepr:
+                if msg.longrepr and self.config.option.quiet == 0:
                     self.tw.write(msg.longrepr)
                     self.tw.line()
                     self.tw.sep('_')
@@ -91,10 +109,9 @@ class MultiRun(object):
             print(msg)
 
     def convert_test_report_to_dict(self, tr):
-        # TODO: Конвертировать в нормальные строки без всяких \u4352
         if type(tr) != dict:
             return None
-        if 'report' not in tr or type(tr['report']) != 'TestReport':
+        if 'report' not in tr or 'TestReport' not in str(type(tr['report'])) or not hasattr(tr['report'], 'nodeid'):
             return None
         res = {
             'nodeid': tr['report'].nodeid,
@@ -180,9 +197,18 @@ class MultiRun(object):
         listener = WaitThread(self.PORT_NUMBER, self.message_handler)
         listener.start()
 
+        # take supported arguments to subprocesses
+        extra_args = []
+        for arg in config._origargs:
+            if arg.startswith('--tb='):
+                extra_args.append(arg)
+
         for group in categories:
             with Pool(processes=MAX_PROCESS) as pool:
-                pool.starmap(_executer, [(test, self.PORT_NUMBER) for test in group])
+                pool.starmap(_executer, [(test, self.PORT_NUMBER, extra_args) for test in group])
+
+        if config.option.quiet > 0:
+            self.tw.line()
 
         listener.stop()
         listener.join(10)
@@ -196,9 +222,9 @@ class MultiRun(object):
 
         if config.option.multirun_logfile:
             # cleanup old log file
-            # TODO: Проверка на возможность создать файл где надо
+            # TODO: check path for exists and create all needed directory
             with open(config.option.multirun_logfile, mode='w') as f:
-                json.dump(report, f, indent=4)
+                json.dump(report, f, indent=4, ensure_ascii=False)
 
         if 'failed' in self.stats and self.stats['failed'] > 0:
             markup = {'red': True}
