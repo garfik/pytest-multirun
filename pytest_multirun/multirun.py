@@ -175,7 +175,9 @@ class MultiRun(object):
             return
 
         if MAX_PROCESS < 2 or MAX_PROCESS > 20:
-            # TODO: неправильно значение мультизапуска, сообщаем об ошибке
+            # strange MAX_PROCESS variable, cancel multirun and run as usually
+            self.tw.line(
+                s='Strange "{}" value in "multirun-process" variable. Run as usually'.format(MAX_PROCESS), red=True)
             return
 
         # check, that we run not specified test or group
@@ -225,7 +227,9 @@ class MultiRun(object):
 
         if config.option.multirun_logfile:
             # cleanup old log file
-            # TODO: check path for exists and create all needed directory
+            folder = os.path.dirname(os.path.abspath(config.option.multirun_logfile))
+            if not os.path.exists(folder):
+                os.makedirs(folder)
             with open(config.option.multirun_logfile, mode='w') as f:
                 json.dump(report, f, indent=4, ensure_ascii=False)
 
