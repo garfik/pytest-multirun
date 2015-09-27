@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import sys
+from py._code.code import ReprExceptionInfo
 import pytest
 
 
@@ -17,10 +18,7 @@ def tsf(request, multirun):
     def fin():
         if not multirun:
             return
-        multirun.add_to_report(request.node.nodeid, 'screenshot', {
-            'filename': '123123123123213_dasdasdasd.png',
-            'duration': 123123
-        })
+        multirun.add_to_report('screenshot', '123123123123213_dasdasdasd.png')
 
     request.addfinalizer(fin)
-    return 'какой-то там драйвер'
+    return 'some custom driver'
