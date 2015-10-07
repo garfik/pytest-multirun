@@ -2,6 +2,7 @@
 from subprocess import Popen, PIPE
 from threading import Lock
 from datetime import datetime
+import sys
 import time
 import json
 import os
@@ -9,6 +10,8 @@ import py
 import pytest
 from py._code.code import ReprExceptionInfo
 from pytest_multirun.thread_pool import ThreadPool
+
+_real_stdout = sys.stdout
 
 
 def _executer(test_cmd, extra_arguments, lock, msg_handler):
@@ -39,6 +42,14 @@ class MultiRun(object):
         self.reports = {}
         self.stats = {}
         self.tw = py.io.TerminalWriter()
+        self.teamcity = False
+        try:
+            if config.option.teamcity >= 1:
+                from teamcity.messages import TeamcityServiceMessages
+                self.teamcity = TeamcityServiceMessages(_real_stdout)
+        except (ImportError, AttributeError):
+            pass
+
         if not self.tw:
             # сообщаем об ошибке
             pass
@@ -127,6 +138,26 @@ class MultiRun(object):
                 self.print_crash_info(rep.nodeid, rep.longrepr)
                 self.write_message(rep.nodeid, 'testOutcome', rep.outcome)
 
+    def send_test_to_teamcity(self, item):
+        tc = self.teamcity
+        if not tc:
+            return
+        test_id = item['id']
+        tc.testStarted(test_id, flowId=test_id)
+        if item['report'].get('failed', False):
+            location = '{}:{}'.format(item['report']['crash'].get('path', ''), item['report']['crash'].get('line'))
+            tc.testFailed(test_id, location, item['report']['crash'].get('trace', ''), flowId=test_id)
+        if bool(item['report']['stdout']):
+            stdout = ''
+            for el in item['report']['stdout']:
+                stdout += '\n{0}:\n {1}'.format(el, item['report']['stdout'][el])
+            tc.testStdOut(test_id, stdout, flowId=test_id)
+        if bool(item['extra']):
+            with tc.block('extra', flowId=test_id):
+                for el in item['extra']:
+                    tc.customMessage(el, item['extra'][el], flowId=test_id)
+        tc.message('testFinished', name=test_id, duration=str(item['report']['duration']), flowId=test_id)
+
     def message_handler(self, msg):
         # TODO: Support xfail\xpassed
         msg = self.convert_msg_to_dict(msg)
@@ -183,7 +214,7 @@ class MultiRun(object):
                     trace_info = 'Catch at {0}:{1}'.format(rep['crash'].get('path', ''), rep['crash'].get('line'))
                     self.tw.line(s=trace_info)
                     self.tw.sep('_')
-            pass
+            self.send_test_to_teamcity(self.reports[msg['id']])
         elif msg['key'] == 'testCrashLineNo':
             rep['crash']['line'] = int(msg['value'])
         elif msg['key'] == 'testCrashText':

@@ -24,7 +24,6 @@ def pytest_cmdline_main(config):
 
 
 def pytest_addoption(parser):
-    # TODO: сделать поддержку teamcity
     # cmd options
     group = parser.getgroup("Run in multiple processes", "multirun")
     group.addoption(
