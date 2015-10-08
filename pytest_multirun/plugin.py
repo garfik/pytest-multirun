@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 import pytest
 from pytest_multirun.multirun import MultiRun
+from pytest_multirun.multirun_client import MultiRunClient
 
 
 @pytest.fixture(scope='function')
 def multirun(request):
-    if not hasattr(request.node, 'multirun_client'):
-        return None
+    mr = request.config.pluginmanager.getplugin('_multirun')
+    if not mr:
+        return
 
-    return request.node.multirun_client
+    return MultiRunClient(mr, request.node)
 
 
 def pytest_cmdline_main(config):
@@ -22,7 +24,6 @@ def pytest_cmdline_main(config):
 
 
 def pytest_addoption(parser):
-    # TODO: сделать поддержку teamcity
     # cmd options
     group = parser.getgroup("Run in multiple processes", "multirun")
     group.addoption(
@@ -36,12 +37,6 @@ def pytest_addoption(parser):
         action='store',
         default=None,
         help='Write results to file in JSON format'
-    )
-    group.addoption(
-        '--multirun-port',
-        action='store',
-        default=6432,
-        help='Port to communicate between processes'
     )
     group.addoption(
         '--multirun-slave',

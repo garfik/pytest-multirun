@@ -2,9 +2,10 @@
 import common
 import time
 import pytest
-common.check_pytest(__file__)
+common.check_pytest(__file__ + ' ')
 
 
-def test_c2t1():
+def test_c2t1(tsf):
     time.sleep(2)
-    assert True
+    print('asdasd')
+    assert 0

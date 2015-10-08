@@ -1,147 +1,242 @@
 # -*- coding: utf-8 -*-
+from subprocess import Popen, PIPE
+from threading import Lock
+from datetime import datetime
+import sys
 import time
 import json
-import sys
 import os
-from datetime import datetime
-from subprocess import Popen, PIPE
-from multiprocessing import Pool
 import py
 import pytest
-from pytest_multirun.wait_thread import WaitThread
-from pytest_multirun.multirun_client import MultiRunClient
+from py._code.code import ReprExceptionInfo
+from pytest_multirun.thread_pool import ThreadPool
+
+_real_stdout = sys.stdout
 
 
-def _executer(test_cmd, port, extra_arguments):
-    cmd = 'py.test ' + test_cmd + ' --multirun-port=' + str(port) + ' --multirun-slave ' + ' '.join(extra_arguments)
-    with Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env=os.environ) as proc:
-        out, err = proc.communicate()
+def _executer(test_cmd, extra_arguments, lock, msg_handler):
+    cmd = 'py.test {} --multirun-slave {}'.format(test_cmd, ' '.join(extra_arguments))
+    try:
+        proc = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env=os.environ)
+        while True:
+            line = proc.stdout.readline().decode('windows-1251')
+            if line == '' and proc.poll() is not None:
+                break
+            line = line.strip()
+            if line.startswith('##multirun'):
+                lock.acquire()
+                # print(line)
+                msg_handler(line)
+                lock.release()
+    except KeyboardInterrupt:
+        print('\nCatch KeyboardInterrupt. Terminating all processes\n')
+        if proc:
+            proc.terminate()
 
 
 class MultiRun(object):
-    PORT_NUMBER = 0
+    quote = {"'": "|'", "|": "||", "\n": "|n", "\r": "|r", ']': '|]'}
 
     def __init__(self, config):
         self.config = config
-        self.PORT_NUMBER = config.option.multirun_port
-        self.mclient = MultiRunClient(self.PORT_NUMBER)
         self.reports = {}
         self.stats = {}
         self.tw = py.io.TerminalWriter()
+        self.teamcity = False
+        try:
+            if config.option.teamcity >= 1:
+                from teamcity.messages import TeamcityServiceMessages
+                self.teamcity = TeamcityServiceMessages(_real_stdout)
+        except (ImportError, AttributeError):
+            pass
+
         if not self.tw:
             # сообщаем об ошибке
             pass
 
+    def write_message(self, test_id, msg, value=''):
+        def escape_value(text):
+            return "".join([self.quote.get(x, x) for x in text])
+
+        attrs = escape_value(str(value))
+        print('\n##multirun|{0}|{1}|{2}|multirun##'.format(test_id, msg, attrs))
+
+    def convert_msg_to_dict(self, msg):
+        """
+
+        :param str msg: String with message from subprocesses
+        :return:
+        """
+        msg = msg.strip()
+        if not msg.startswith('##multirun') or not msg.endswith('multirun##'):
+            return
+        ret = {
+            'id': '',
+            'key': '',
+            'value': ''
+        }
+        # cut multirun prefix and postfix
+        msg = msg[11:-11]
+        ret['id'] = msg[:msg.find('|')]
+        msg = msg[msg.find('|') + 1:]
+        ret['key'] = msg[:msg.find('|')]
+        msg = msg[msg.find('|') + 1:]
+        if msg:
+            for k,v in self.quote.items():
+                msg = msg.replace(v, k)
+            ret['value'] = msg
+        return ret
+
+    def print_crash_info(self, test_id, rep):
+        if not rep:
+            return
+
+        if type(rep) == ReprExceptionInfo:
+            self.write_message(test_id, 'testCrashLineNo', rep.reprcrash.lineno)
+            self.write_message(test_id, 'testCrashText', rep.reprcrash.message)
+            self.write_message(test_id, 'testCrashPath', rep.reprcrash.path)
+            self.write_message(test_id, 'testCrashTrace', rep.reprtraceback)
+        elif type(rep) == tuple:
+            self.write_message(test_id, 'testCrashLineNo', rep[1])
+            self.write_message(test_id, 'testCrashText', rep[2])
+            self.write_message(test_id, 'testCrashPath', rep[0])
+        else:
+            self.write_message(test_id, 'testPluginError', 'longrepr: ' + str(rep))
+
     def pytest_runtest_setup(self, item):
-        item.multirun_client = self.mclient
+        # item.multirun_client = self.mclient
+        pass
 
-    @pytest.mark.tryfirst
-    def pytest_runtest_makereport(self, item, call, __multicall__):
-        rep = __multicall__.execute()
+    def pytest_runtest_logstart(self, nodeid, location):
+        self.write_message(nodeid, 'testStart')
 
-        if not item.config.option.multirun_slave:
-            return rep
+    @pytest.mark.hookwrapper
+    def pytest_runtest_makereport(self, item, call):
+        outcome = yield
+        rep = outcome.get_result()
+        print()
+        if not rep:
+            return
+        if rep.when == 'call':
+            self.print_crash_info(rep.nodeid, rep.longrepr)
+            self.write_message(rep.nodeid, 'testDuration', rep.duration)
+            self.write_message(rep.nodeid, 'testOutcome', rep.outcome)
+        elif rep.when == 'teardown':
+            for el in rep.sections:
+                if el[0].lower().startswith('captured stdmultirun'):
+                    self.write_message(rep.nodeid, 'MULTIRUN_EXTRA_{}'.format(el[0][21:].replace(' ', '')), el[1])
+                if el[0].lower() == 'captured stdout call':
+                    self.write_message(rep.nodeid, 'testStdOutCall', el[1])
+                if el[0].lower() == 'captured stdout setup':
+                    self.write_message(rep.nodeid, 'testStdOutSetup', el[1])
+                if el[0].lower() == 'captured stdout teardown':
+                    self.write_message(rep.nodeid, 'testStdOutTearDown', el[1])
+            self.write_message(rep.nodeid, 'testStop')
+        else:
+            # если мы на стадии настройки упали, то сообщим об этом
+            if rep.failed:
+                self.print_crash_info(rep.nodeid, rep.longrepr)
+                self.write_message(rep.nodeid, 'testOutcome', rep.outcome)
 
-        if rep.when != 'call':
-            return rep
-
-        self.mclient.send_report(rep)
-
-        return rep
+    def send_test_to_teamcity(self, item):
+        tc = self.teamcity
+        if not tc:
+            return
+        test_id = item['id']
+        tc.testStarted(test_id, flowId=test_id)
+        if item['report'].get('failed', False):
+            location = '{}:{}'.format(item['report']['crash'].get('path', ''), item['report']['crash'].get('line'))
+            tc.testFailed(test_id, location, item['report']['crash'].get('trace', ''), flowId=test_id)
+        if bool(item['report']['stdout']):
+            stdout = ''
+            for el in item['report']['stdout']:
+                stdout += '\n{0}:\n {1}'.format(el, item['report']['stdout'][el])
+            tc.testStdOut(test_id, stdout, flowId=test_id)
+        if bool(item['extra']):
+            with tc.block('extra', flowId=test_id):
+                for el in item['extra']:
+                    tc.customMessage(el, item['extra'][el], flowId=test_id)
+        tc.message('testFinished', name=test_id, duration=str(item['report']['duration']), flowId=test_id)
 
     def message_handler(self, msg):
         # TODO: Support xfail\xpassed
-        if 'TestReport' in str(type(msg)) and hasattr(msg, 'nodeid'):
-            # пришел отчет о тесте
-            if msg.nodeid not in self.reports:
-                self.reports[msg.nodeid] = {}
-            self.reports[msg.nodeid]['report'] = msg
+        msg = self.convert_msg_to_dict(msg)
+        if not msg:
+            return
 
-            # if -q not set, then write test name
+        if msg['id'] not in self.reports:
+            self.reports[msg['id']] = {
+                'id': msg['id'],
+                'extra': {},
+                'report': {
+                    'crash': {},
+                    'stdout': {}
+                }
+            }
+
+        rep = self.reports[msg['id']]['report']
+        if msg['key'] == 'testDuration':
+            rep['duration'] = float(msg['value'])
+        elif msg['key'] == 'testOutcome':
+            rep['outcome'] = msg['value'].lower()
+        elif msg['key'] == 'testStart':
+            pass
+        elif msg['key'] == 'testStop':
+            # сообщим о том, что тест закончился
             if self.config.option.quiet == 0:
-                if self.config.option.verbose > 0:
-                    self.tw.write(msg.nodeid)
-                else:
-                    self.tw.write(msg.location[0])
+                self.tw.write(msg['id'])
+            if rep['outcome'] not in self.stats:
+                self.stats[rep['outcome']] = 0
+            self.stats[rep['outcome']] += 1
 
-            if msg.outcome.lower() not in self.stats:
-                self.stats[msg.outcome.lower()] = 0
-            self.stats[msg.outcome.lower()] += 1
-
-            if msg.outcome.lower() == 'passed':
+            if rep['outcome'] == 'passed':
+                rep['passed'] = True
                 if self.config.option.verbose > 0:
                     self.tw.line(s=' PASSED', green=True)
                 elif self.config.option.quiet > 0:
                     self.tw.write('.', green=True)
                 else:
                     self.tw.line(s=' .', green=True)
-            elif msg.outcome.lower() == 'failed':
+            elif rep['outcome'] == 'failed':
+                rep['failed'] = True
                 if self.config.option.verbose > 0:
                     self.tw.line(s=' FAILED', red=True)
                 elif self.config.option.quiet > 0:
                     self.tw.write('F', red=True)
                 else:
                     self.tw.line(s=' F', red=True)
-                if msg.longrepr and self.config.option.quiet == 0:
-                    self.tw.write(msg.longrepr)
-                    self.tw.line()
-                    self.tw.sep('_')
             else:
-                self.tw.line(' ' + msg.outcome)
-                if msg.longrepr and self.config.option.quiet == 0:
-                    self.tw.write(msg.longrepr)
+                self.tw.line(' ' + rep['outcome'])
+            if rep['outcome'] == 'failed' or rep['outcome'] != 'passed':
+                if bool(rep['crash']) and self.config.option.quiet == 0:
+                    self.tw.write(rep['crash'].get('trace', ''))
                     self.tw.line()
+                    trace_info = 'Catch at {0}:{1}'.format(rep['crash'].get('path', ''), rep['crash'].get('line'))
+                    self.tw.line(s=trace_info)
                     self.tw.sep('_')
-        elif type(msg) == dict and msg['type'] == 'extra':
-            if msg['nodeid'] not in self.reports:
-                self.reports[msg['nodeid']] = {}
-            rep = self.reports[msg['nodeid']]
-            if 'extra' not in rep:
-                rep['extra'] = {}
-            rep['extra'][msg['key']] = msg['value']
+            self.send_test_to_teamcity(self.reports[msg['id']])
+        elif msg['key'] == 'testCrashLineNo':
+            rep['crash']['line'] = int(msg['value'])
+        elif msg['key'] == 'testCrashText':
+            rep['crash']['msg'] = msg['value']
+        elif msg['key'] == 'testCrashPath':
+            rep['crash']['path'] = msg['value']
+        elif msg['key'] == 'testCrashTrace':
+            rep['crash']['trace'] = msg['value']
+
+        elif msg['key'] == 'testStdOutCall':
+            rep['stdout']['call'] = msg['value']
+        elif msg['key'] == 'testStdOutSetup':
+            rep['stdout']['setup'] = msg['value']
+        elif msg['key'] == 'testStdOutTearDown':
+            rep['stdout']['teardown'] = msg['value']
+
+        elif msg['key'].startswith('MULTIRUN_EXTRA_'):
+            self.reports[msg['id']]['extra'][msg['key'][15:]] = msg['value']
+
         else:
-            print(msg)
-
-    def convert_test_report_to_dict(self, tr):
-        if type(tr) != dict:
-            return None
-        if 'report' not in tr or 'TestReport' not in str(type(tr['report'])) or not hasattr(tr['report'], 'nodeid'):
-            return None
-        res = {
-            'nodeid': tr['report'].nodeid,
-            'duration': tr['report'].duration,
-            'keywords': tr['report'].keywords,
-            'location': tr['report'].location,
-            'outcome': tr['report'].outcome,
-            'failed': tr['report'].failed,
-            'name': tr['report'].location[2],
-            'path': tr['report'].location[0],
-            'passed': tr['report'].passed,
-            'skipped': tr['report'].skipped,
-            'longrepr': None,
-            'when': tr['report'].when,
-            'sections': tr['report'].sections,
-            'extra': tr['extra'] if 'extra' in tr else None
-        }
-
-        if tr['report'].longrepr and hasattr(tr['report'].longrepr, 'reprcrash'):
-            res['longrepr'] = {
-                'trace': str(tr['report'].longrepr),
-                'text': tr['report'].longrepr.reprcrash.message,
-                'lineno': tr['report'].longrepr.reprcrash.lineno,
-                'path': tr['report'].longrepr.reprcrash.path
-            }
-        elif tr['report'].longrepr and type(tr['report'].longrepr) == tuple:
-            res['longrepr'] = {
-                'trace': '',
-                'text': tr['report'].longrepr[2],
-                'lineno': tr['report'].longrepr[1],
-                'path': tr['report'].longrepr[0]
-            }
-        elif tr['report'].longrepr:
-            res['longrepr'] = str(tr['report'].longrepr)
-
-        return res
+            # get an unknown message... what we need to do?
+            return
 
     def pytest_cmdline_main(self, config):
         # if run as slave node, then run as usually
@@ -171,7 +266,7 @@ class MultiRun(object):
         # check, that we have categories list
         if not categories:
             # if not, then tell about it and run as usually
-            self.tw.line(s='Cant find any test group list. Please specify it by cmd param or in ini file', red=True)
+            self.tw.line(s='Can\'t find any test group list. Please specify it by cmd param or in ini file', red=True)
             return
 
         if MAX_PROCESS < 2 or MAX_PROCESS > 20:
@@ -184,6 +279,7 @@ class MultiRun(object):
         # TODO: looks bad :(
         if not config.args or '.py' in config.args[0].lower() or '::' in config.args[0].lower():
             # TODO: сообщаем об ошибке
+            self.tw.line(s='Looks like we have only one test. Run as usually', red=True)
             return
 
         time_start = time.time()
@@ -199,29 +295,29 @@ class MultiRun(object):
         self.tw.line(s='lets go...')
         self.tw.line()
 
-        listener = WaitThread(self.PORT_NUMBER, self.message_handler)
-        listener.start()
-
         # take supported arguments to subprocesses
         extra_args = []
         for arg in config._origargs:
             if arg.startswith('--tb='):
                 extra_args.append(arg)
 
+        lock = Lock()
+        pool = ThreadPool(MAX_PROCESS)
+
         for group in categories:
-            with Pool(processes=MAX_PROCESS) as pool:
-                pool.starmap(_executer, [(test, self.PORT_NUMBER, extra_args) for test in group])
+            for test in group:
+                pool.add_task(_executer, test, extra_args, lock, self.message_handler)
+
+            pool.start_task()
+            pool.wait_completion()
 
         if config.option.quiet > 0:
             self.tw.line()
 
-        listener.stop()
-        listener.join(10)
-
         report = {
             'datetime': datetime.now().isoformat(),
             'duration': time.time() - time_start,
-            'cases': [self.convert_test_report_to_dict(self.reports[x]) for x in self.reports],
+            'cases': self.reports,
             'stats': self.stats
         }
 
@@ -241,5 +337,4 @@ class MultiRun(object):
         parts = ['{1} {0}'.format(x, self.stats[x]) for x in self.stats if self.stats[x] > 0]
         msg = "%s in %.2f seconds" % (', '.join(parts), report['duration'])
         self.tw.sep('=', title=msg, **markup)
-
         return 0
