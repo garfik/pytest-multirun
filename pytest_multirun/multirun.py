@@ -168,7 +168,7 @@ class MultiRun(object):
         if bool(item['extra']):
             with tc.block('extra', flowId=test_id):
                 for el in item['extra']:
-                    tc.customMessage(el, item['extra'][el], flowId=test_id)
+                    tc.customMessage(el, item['extra'][el], errorDetails=item['extra'][el], flowId=test_id)
         duration = timedelta(seconds=item['report'].get('duration', 0))
         tc.testFinished(test_id, testDuration=duration, flowId=test_id)
 
