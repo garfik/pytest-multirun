@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
 from subprocess import Popen, PIPE
 from threading import Lock
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 import time
 import json
+import re
 import os
 import py
 import pytest
@@ -139,10 +140,22 @@ class MultiRun(object):
                 self.write_message(rep.nodeid, 'testOutcome', rep.outcome)
 
     def send_test_to_teamcity(self, item):
+        def format_test_id(node_id):
+            result = node_id
+
+            if result.find("::") < 0:
+                result += "::top_level"
+
+            result = result.replace("::()::", "::")
+            result = re.sub(r"\.pyc?::", r"::", result)
+            result = result.replace(".", "_").replace(os.sep, ".").replace("/", ".").replace('::', '.')
+
+            return result
+
         tc = self.teamcity
         if not tc:
             return
-        test_id = item['id']
+        test_id = format_test_id(item['id'])
         tc.testStarted(test_id, flowId=test_id)
         if item['report'].get('failed', False):
             location = '{}:{}'.format(item['report']['crash'].get('path', ''), item['report']['crash'].get('line'))
@@ -156,7 +169,8 @@ class MultiRun(object):
             with tc.block('extra', flowId=test_id):
                 for el in item['extra']:
                     tc.customMessage(el, item['extra'][el], flowId=test_id)
-        tc.message('testFinished', name=test_id, duration=str(item['report']['duration']), flowId=test_id)
+        duration = timedelta(seconds=item['report']['duration'])
+        tc.testFinished(test_id, testDuration=duration, flowId=test_id)
 
     def message_handler(self, msg):
         # TODO: Support xfail\xpassed
