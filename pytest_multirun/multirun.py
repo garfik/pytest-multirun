@@ -170,7 +170,7 @@ class MultiRun(object):
                 for el in item['extra']:
                     tc.customMessage(el, item['extra'][el], flowId=test_id)
         duration = timedelta(seconds=item['report']['duration'])
-        self.teamcity.testFinished(test_id, testDuration=duration, flowId=test_id)
+        tc.testFinished(test_id, testDuration=duration, flowId=test_id)
 
     def message_handler(self, msg):
         # TODO: Support xfail\xpassed
