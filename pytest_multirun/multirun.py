@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import codecs
 from subprocess import Popen, PIPE
 from threading import Lock
 from datetime import datetime, timedelta
@@ -18,9 +19,15 @@ _real_stdout = sys.stdout
 def _executer(test_cmd, extra_arguments, lock, msg_handler):
     cmd = 'py.test {} --multirun-slave {}'.format(test_cmd, ' '.join(extra_arguments))
     try:
-        proc = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env=os.environ)
+        my_env = os.environ
+        my_env['PYTHONIOENCODING'] = 'utf-8'
+        proc = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env=my_env)
         while True:
-            line = proc.stdout.readline().decode('windows-1251')
+            try:
+                line = proc.stdout.readline().decode('utf-8')
+            except:
+                print('Error while get string from multirun-slave client, cmd is "{}"'.format(cmd))
+                line = ''
             if line == '' and proc.poll() is not None:
                 break
             line = line.strip()
