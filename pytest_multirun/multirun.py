@@ -169,17 +169,29 @@ class MultiRun(object):
         test_id = format_test_id(item['id'])
         tc.testStarted(test_id, flowId=test_id)
         if item['report'].get('failed', False):
-            location = '{}:{}'.format(item['report']['crash'].get('path', ''), item['report']['crash'].get('line'))
-            tc.testFailed(test_id, location, item['report']['crash'].get('trace', ''), flowId=test_id)
+            try:
+                location = '{}:{}'.format(item['report']['crash'].get('path', ''), item['report']['crash'].get('line'))
+                tc.testFailed(test_id, location, item['report']['crash'].get('trace', ''), flowId=test_id)
+            except Exception as e:
+                print('Exception from TeamCity testFailed')
+                print(e)
         if bool(item['report']['stdout']):
-            stdout = ''
-            for el in item['report']['stdout']:
-                stdout += '\n{0}:\n {1}'.format(el, item['report']['stdout'][el])
-            tc.testStdOut(test_id, stdout, flowId=test_id)
+            try:
+                stdout = ''
+                for el in item['report']['stdout']:
+                    stdout += '\n{0}:\n {1}'.format(el, item['report']['stdout'][el])
+                tc.testStdOut(test_id, stdout, flowId=test_id)
+            except Exception as e:
+                print('Exception from TeamCity testStdOut')
+                print(e)
         if bool(item['extra']):
-            with tc.block('extra', flowId=test_id):
-                for el in item['extra']:
-                    tc.customMessage(el, item['extra'][el], errorDetails=item['extra'][el], flowId=test_id)
+            try:
+                with tc.block('extra', flowId=test_id):
+                    for el in item['extra']:
+                        tc.customMessage('"{}" is "{}"'.format(el, item['extra'][el]), 'NORMAL', flowId=test_id)
+            except Exception as e:
+                print('Exception from TeamCity testStdOut')
+                print(e)
         duration = timedelta(seconds=item['report'].get('duration', 0))
         tc.testFinished(test_id, testDuration=duration, flowId=test_id)
 
