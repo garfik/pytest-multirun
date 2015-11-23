@@ -33,8 +33,12 @@ def _executer(test_cmd, extra_arguments, lock, msg_handler):
             line = line.strip()
             if line.startswith('##multirun'):
                 lock.acquire()
-                # print(line)
-                msg_handler(line)
+                try:
+                    # print(line)
+                    msg_handler(line)
+                except Exception as e:
+                    print('Get unknown exception while message handle')
+                    print(e)
                 lock.release()
     except KeyboardInterrupt:
         print('\nCatch KeyboardInterrupt. Terminating all processes\n')
@@ -235,7 +239,13 @@ class MultiRun(object):
                     trace_info = 'Catch at {0}:{1}'.format(rep['crash'].get('path', ''), rep['crash'].get('line'))
                     self.tw.line(s=trace_info)
                     self.tw.sep('_')
-            self.send_test_to_teamcity(self.reports[msg['id']])
+            if self.config.option.verbose > 0:
+                self.tw.line(s='Test duration {}'.format(rep['duration']))
+            try:
+                self.send_test_to_teamcity(self.reports[msg['id']])
+            except Exception as e:
+                print('Exception from teamcity messaging')
+                print(e)
         elif msg['key'] == 'testCrashLineNo':
             rep['crash']['line'] = int(msg['value'])
         elif msg['key'] == 'testCrashText':
