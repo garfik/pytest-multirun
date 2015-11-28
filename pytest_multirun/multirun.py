@@ -309,7 +309,7 @@ class MultiRun(object):
         categories = []
         # set categories list in cmd param
         if config.option.multirun_list:
-            categories = [group.split(',') for group in config.option.multirun_list.split(':') if group]
+            categories = [group.split(',') for group in config.option.multirun_list.split(';') if group]
 
         if not categories:
             # well, if cant find in cmd param then search in ini file

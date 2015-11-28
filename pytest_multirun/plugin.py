@@ -47,7 +47,7 @@ def pytest_addoption(parser):
     group.addoption(
         '--multirun-list',
         action='store',
-        help='List of commands divided by ":" for group and divided by "," for tests in group. '
+        help='List of commands divided by ";" for group and divided by "," for tests in group. '
              'This param has priority on INI option',
         default=None
     )
@@ -55,8 +55,8 @@ def pytest_addoption(parser):
     # INI options
     parser.addini(
         'multirun-list',
-        help='List of commands divided by space for group and divided by "," for tests in group',
-        type='args',
+        help='List of commands divided by newline for group and divided by "," for tests in group',
+        type='linelist',
         default=[]
     )
     parser.addini(
