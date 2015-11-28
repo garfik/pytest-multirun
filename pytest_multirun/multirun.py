@@ -34,7 +34,7 @@ def _executer(test_cmd, extra_arguments, lock, msg_handler):
             if line.startswith('##multirun'):
                 lock.acquire()
                 try:
-                    # print(line)
+                    # print(line.encode(sys.stdout.encoding, errors='replace').decode(sys.stdout.encoding))
                     msg_handler(line)
                 except Exception as e:
                     print('Get unknown exception while message handle')
@@ -163,6 +163,9 @@ class MultiRun(object):
 
             return result
 
+        def convert_string(text, from_enc=sys.stdout.encoding, to_enc=sys.stdout.encoding):
+            return text.encode(from_enc, errors='replace').decode(to_enc)
+
         tc = self.teamcity
         if not tc:
             return
@@ -171,7 +174,12 @@ class MultiRun(object):
         if item['report'].get('failed', False):
             try:
                 location = '{}:{}'.format(item['report']['crash'].get('path', ''), item['report']['crash'].get('line'))
-                tc.testFailed(test_id, location, item['report']['crash'].get('trace', ''), flowId=test_id)
+                tc.testFailed(
+                    test_id,
+                    location,
+                    convert_string(item['report']['crash'].get('trace', '')),
+                    flowId=test_id
+                )
             except Exception as e:
                 print('Exception from TeamCity testFailed')
                 print(e)
@@ -180,7 +188,7 @@ class MultiRun(object):
                 stdout = ''
                 for el in item['report']['stdout']:
                     stdout += '\n{0}:\n {1}'.format(el, item['report']['stdout'][el])
-                tc.testStdOut(test_id, stdout, flowId=test_id)
+                tc.testStdOut(test_id, convert_string(stdout), flowId=test_id)
             except Exception as e:
                 print('Exception from TeamCity testStdOut')
                 print(e)
@@ -188,7 +196,9 @@ class MultiRun(object):
             try:
                 with tc.block('extra', flowId=test_id):
                     for el in item['extra']:
-                        tc.customMessage('"{}" is "{}"'.format(el, item['extra'][el]), 'NORMAL', flowId=test_id)
+                        tc.customMessage(convert_string('"{}" is "{}"'.format(el, item['extra'][el])),
+                                         'NORMAL',
+                                         flowId=test_id)
             except Exception as e:
                 print('Exception from TeamCity testStdOut')
                 print(e)
