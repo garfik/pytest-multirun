@@ -51,6 +51,12 @@ def pytest_addoption(parser):
              'This param has priority on INI option',
         default=None
     )
+    group.addoption(
+        '--multirun-rerun',
+        action='store',
+        help='Maximum tries before test set as failed',
+        default=None
+    )
 
     # INI options
     parser.addini(
@@ -64,4 +70,10 @@ def pytest_addoption(parser):
         help='Maximum processes at one time',
         type='args',
         default=5
+    )
+    parser.addini(
+        'multirun-rerun',
+        help='Maximum tries before test set as failed',
+        type='args',
+        default=0
     )

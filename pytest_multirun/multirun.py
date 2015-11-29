@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import codecs
 from subprocess import Popen, PIPE
 from threading import Lock
 from datetime import datetime, timedelta
@@ -9,8 +8,8 @@ import json
 import re
 import os
 import py
-import pytest
 from py._code.code import ReprExceptionInfo
+from _pytest.runner import runtestprotocol
 from pytest_multirun.thread_pool import ThreadPool
 
 _real_stdout = sys.stdout
@@ -119,37 +118,6 @@ class MultiRun(object):
         # item.multirun_client = self.mclient
         pass
 
-    def pytest_runtest_logstart(self, nodeid, location):
-        self.write_message(nodeid, 'testStart')
-
-    @pytest.mark.hookwrapper
-    def pytest_runtest_makereport(self, item, call):
-        outcome = yield
-        rep = outcome.get_result()
-        print()
-        if not rep:
-            return
-        if rep.when == 'call':
-            self.print_crash_info(rep.nodeid, rep.longrepr)
-            self.write_message(rep.nodeid, 'testDuration', rep.duration)
-            self.write_message(rep.nodeid, 'testOutcome', rep.outcome)
-        elif rep.when == 'teardown':
-            for el in rep.sections:
-                if el[0].lower().startswith('captured stdmultirun'):
-                    self.write_message(rep.nodeid, 'MULTIRUN_EXTRA_{}'.format(el[0][21:].replace(' ', '')), el[1])
-                if el[0].lower() == 'captured stdout call':
-                    self.write_message(rep.nodeid, 'testStdOutCall', el[1])
-                if el[0].lower() == 'captured stdout setup':
-                    self.write_message(rep.nodeid, 'testStdOutSetup', el[1])
-                if el[0].lower() == 'captured stdout teardown':
-                    self.write_message(rep.nodeid, 'testStdOutTearDown', el[1])
-            self.write_message(rep.nodeid, 'testStop')
-        else:
-            # если мы на стадии настройки упали, то сообщим об этом
-            if rep.failed:
-                self.print_crash_info(rep.nodeid, rep.longrepr)
-                self.write_message(rep.nodeid, 'testOutcome', rep.outcome)
-
     def send_test_to_teamcity(self, item):
         def format_test_id(node_id):
             result = node_id
@@ -200,7 +168,7 @@ class MultiRun(object):
                                          'NORMAL',
                                          flowId=test_id)
             except Exception as e:
-                print('Exception from TeamCity testStdOut')
+                print('Exception from TeamCity testStdExtra')
                 print(e)
         duration = timedelta(seconds=item['report'].get('duration', 0))
         tc.testFinished(test_id, testDuration=duration, flowId=test_id)
@@ -353,6 +321,8 @@ class MultiRun(object):
         for arg in config._origargs:
             if arg.startswith('--tb='):
                 extra_args.append(arg)
+            if arg.startswith('--multirun-rerun='):
+                extra_args.append(arg)
 
         lock = Lock()
         pool = ThreadPool(MAX_PROCESS)
@@ -391,3 +361,68 @@ class MultiRun(object):
         msg = "%s in %.2f seconds" % (', '.join(parts), report['duration'])
         self.tw.sep('=', title=msg, **markup)
         return 0
+
+    def pytest_runtest_protocol(self, item, nextitem):
+        config = item.session.config
+
+        # if run not as slave node, then run as usually
+        if not config.option.multirun_slave:
+            return
+
+        try:
+            if hasattr(config.option, 'multirun_rerun') and config.option.multirun_rerun is not None:
+                rerun = int(config.option.multirun_rerun)
+            else:
+                rerun = int(config.getini("multirun-rerun")[0])
+        except:
+            rerun = 0
+
+        if rerun < 0 or rerun > 999:
+            rerun = 0
+
+        item.ihook.pytest_runtest_logstart(
+            nodeid=item.nodeid, location=item.location,
+        )
+
+        reports = []
+        for i in range(rerun + 1):
+            reports = runtestprotocol(item, nextitem=nextitem, log=False)
+            if i > 0:
+                reports[1].rerun = i
+
+            # break if setup and call pass
+            if reports[0].passed and reports[1].passed:
+                break
+
+        for report in reports:
+            item.ihook.pytest_runtest_logreport(report=report)
+
+        self.handle_setup_stage(reports[0])
+        self.handle_call_stage(reports[1])
+        self.handle_teardown_stage(reports[2])
+
+        return True
+
+    def handle_setup_stage(self, report):
+        self.write_message(report.nodeid, 'testStart')
+        if report.failed:
+            # if we fail at setup stage, then write about it
+            self.print_crash_info(report.nodeid, report.longrepr)
+            self.write_message(report.nodeid, 'testOutcome', report.outcome)
+
+    def handle_call_stage(self, report):
+        self.print_crash_info(report.nodeid, report.longrepr)
+        self.write_message(report.nodeid, 'testDuration', report.duration)
+        self.write_message(report.nodeid, 'testOutcome', report.outcome)
+
+    def handle_teardown_stage(self, report):
+        for el in report.sections:
+            if el[0].lower().startswith('captured stdmultirun'):
+                self.write_message(report.nodeid, 'MULTIRUN_EXTRA_{}'.format(el[0][21:].replace(' ', '')), el[1])
+            if el[0].lower() == 'captured stdout call':
+                self.write_message(report.nodeid, 'testStdOutCall', el[1])
+            if el[0].lower() == 'captured stdout setup':
+                self.write_message(report.nodeid, 'testStdOutSetup', el[1])
+            if el[0].lower() == 'captured stdout teardown':
+                self.write_message(report.nodeid, 'testStdOutTearDown', el[1])
+        self.write_message(report.nodeid, 'testStop')
