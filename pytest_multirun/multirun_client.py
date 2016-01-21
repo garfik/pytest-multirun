@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-from multiprocessing.connection import Listener, Client
 
 
 class MultiRunClient(object):

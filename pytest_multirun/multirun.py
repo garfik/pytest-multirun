@@ -299,7 +299,6 @@ class MultiRun(object):
         # check, that we run not specified test or group
         # TODO: looks bad :(
         if not config.args or '.py' in config.args[0].lower() or '::' in config.args[0].lower():
-            # TODO: сообщаем об ошибке
             self.tw.line(s='Looks like we have only one test. Run as usually', red=True)
             return
 
@@ -323,6 +322,10 @@ class MultiRun(object):
                 extra_args.append(arg)
             if arg.startswith('--multirun-rerun='):
                 extra_args.append(arg)
+
+        # if user set some mark expression, than use it
+        if hasattr(config.option, 'markexpr') and config.option.markexpr:
+            extra_args.append('-m "{}"'.format(config.option.markexpr))
 
         lock = Lock()
         pool = ThreadPool(MAX_PROCESS)
