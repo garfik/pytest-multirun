@@ -16,8 +16,8 @@ from pytest_multirun import ecu
 _real_stdout = sys.stdout
 
 
-def _executer(test_cmd, extra_arguments, lock, msg_handler):
-    cmd = 'py.test {} --multirun-slave {}'.format(test_cmd, ' '.join(extra_arguments))
+def _executer(test_cmd, extra_arguments, lock, msg_handler, logger):
+    cmd = 'py.test {} -vv --multirun-slave {}'.format(test_cmd, ' '.join(extra_arguments))
     try:
         my_env = os.environ
         my_env['PYTHONIOENCODING'] = 'utf-8'
@@ -30,6 +30,7 @@ def _executer(test_cmd, extra_arguments, lock, msg_handler):
                 line = ''
             if line == '' and proc.poll() is not None:
                 break
+            logger(cmd, line)
             line = line.strip()
             if line.startswith('##multirun'):
                 lock.acquire()
@@ -72,6 +73,16 @@ class MultiRun(object):
 
         attrs = escape_value(str(value))
         print('\n##multirun|{0}|{1}|{2}|multirun##'.format(test_id, msg, attrs))
+
+    def log(self, cmd, line):
+        if self.config.option.multirun_debugfolder:
+            import hashlib
+            filename = hashlib.md5(cmd.encode('utf-8')).hexdigest()
+            folder = os.path.abspath(self.config.option.multirun_debugfolder)
+            if not os.path.exists(folder):
+                os.makedirs(folder)
+            with open("{0}\\{1}.txt".format(folder, filename), mode='a') as f:
+                f.write(line)
 
     def convert_msg_to_dict(self, msg):
         """
@@ -333,7 +344,7 @@ class MultiRun(object):
 
         for group in categories:
             for test in group:
-                pool.add_task(_executer, test, extra_args, lock, self.message_handler)
+                pool.add_task(_executer, test, extra_args, lock, self.message_handler, self.log)
 
             pool.start_task()
             pool.wait_completion()

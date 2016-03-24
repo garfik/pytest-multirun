@@ -39,6 +39,12 @@ def pytest_addoption(parser):
         help='Write results to file in JSON format'
     )
     group.addoption(
+        '--multirun-debugfolder',
+        action='store',
+        default=None,
+        help='Write all output from py.test processes to chosen folder'
+    )
+    group.addoption(
         '--multirun-slave',
         action='store_true',
         default=False,
