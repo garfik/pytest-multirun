@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from subprocess import Popen, PIPE
+from subprocess import Popen, PIPE, STDOUT
 from threading import Lock
 from datetime import datetime, timedelta
 import sys
@@ -21,7 +21,7 @@ def _executer(test_cmd, extra_arguments, lock, msg_handler, logger):
     try:
         my_env = os.environ
         my_env['PYTHONIOENCODING'] = 'utf-8'
-        proc = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE, env=my_env)
+        proc = Popen(cmd, shell=True, stdout=PIPE, stderr=STDOUT, env=my_env)
         while True:
             try:
                 line = ecu(proc.stdout.readline())
@@ -207,6 +207,7 @@ class MultiRun(object):
         elif msg['key'] == 'testOutcome':
             rep['outcome'] = msg['value'].lower()
         elif msg['key'] == 'testStart':
+            # TODO: notify teamcity about test start
             pass
         elif msg['key'] == 'testStop':
             # сообщим о том, что тест закончился
@@ -407,23 +408,20 @@ class MultiRun(object):
                 # break if setup and call pass
                 if reports[0].passed and reports[1].passed:
                     break
-            except Exception as e:
+            except:
                 # if we get some errors (for example our fixture is breaks), than do nothing
                 pass
 
         for report in reports:
             item.ihook.pytest_runtest_logreport(report=report)
-
-        if len(reports) == 0:
-            reports.append(None)
-        if len(reports) == 1:
-            reports.append(None)
-        if len(reports) == 2:
-            reports.append(None)
-
-        self.handle_setup_stage(item.nodeid, reports[0])
-        self.handle_call_stage(item.nodeid, reports[1])
-        self.handle_teardown_stage(item.nodeid, reports[2])
+            if not hasattr(report, 'when'):
+                continue
+            if report.when == 'setup':
+                self.handle_setup_stage(item.nodeid, report)
+            elif report.when == 'teardown':
+                self.handle_teardown_stage(item.nodeid, report)
+            else:
+                self.handle_call_stage(item.nodeid, report)
 
         return True
 

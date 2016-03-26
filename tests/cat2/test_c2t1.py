@@ -7,5 +7,5 @@ common.check_pytest(__file__ + ' ')
 
 def test_c2t1(tsf):
     time.sleep(2)
-    print('asdasd')
-    assert 0
+    print('Captured stdout error')
+    assert 1
