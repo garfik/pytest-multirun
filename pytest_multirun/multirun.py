@@ -412,9 +412,15 @@ class MultiRun(object):
                 # if we get some errors (for example our fixture is breaks), than do nothing
                 pass
 
+        self.write_message(item.nodeid, 'testStart')
+        if len(reports) != 3:
+            self.write_message(item.nodeid, 'testOutcome', 'failed')
+            self.print_crash_info(item.nodeid, 'Multirun plugin error')
+
         for report in reports:
             item.ihook.pytest_runtest_logreport(report=report)
             if not hasattr(report, 'when'):
+                self.write_message(item.nodeid, 'testOutcome', 'failed')
                 continue
             if report.when == 'setup':
                 self.handle_setup_stage(item.nodeid, report)
@@ -423,10 +429,11 @@ class MultiRun(object):
             else:
                 self.handle_call_stage(item.nodeid, report)
 
+        self.write_message(item.nodeid, 'testStop')
+
         return True
 
     def handle_setup_stage(self, nodeid, report):
-        self.write_message(nodeid, 'testStart')
         if report and report.failed:
             # if we fail at setup stage, then write about it
             self.print_crash_info(nodeid, report.longrepr)
@@ -449,4 +456,3 @@ class MultiRun(object):
                     self.write_message(nodeid, 'testStdOutSetup', el[1])
                 if el[0].lower() == 'captured stdout teardown':
                     self.write_message(nodeid, 'testStdOutTearDown', el[1])
-        self.write_message(nodeid, 'testStop')

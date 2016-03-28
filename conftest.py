@@ -21,4 +21,3 @@ def tsf(request, multirun):
         multirun.add_to_report('screenshot', '123123123123213_dasdasdasd.png')
 
     request.addfinalizer(fin)
-    return 'some custom driver'

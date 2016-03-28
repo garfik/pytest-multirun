@@ -4,7 +4,7 @@ from setuptools import setup, find_packages
 setup(
     name='pytest_multirun',
     description='pytest plugin to run your tests in parallel mode',
-    version=0.9,
+    version=0.10,
     author='Dmitrii Kulikov',
     author_email='garf.freeman@gmail.com',
     url='https://github.com/garfik/pytest-multirun',
