@@ -243,7 +243,10 @@ class MultiRun(object):
                     self.tw.line(s=trace_info)
                     self.tw.sep('_')
             if self.config.option.verbose > 0:
-                self.tw.line(s='Test duration {}'.format(rep['duration']))
+                if 'duration' in rep:
+                    self.tw.line(s='Test duration {}'.format(rep['duration']))
+                else:
+                    self.tw.line(s='Test duration is unknown')
             try:
                 self.send_test_to_teamcity(self.reports[msg['id']])
             except Exception as e:
@@ -442,6 +445,7 @@ class MultiRun(object):
     def handle_call_stage(self, nodeid, report):
         if report:
             self.print_crash_info(nodeid, report.longrepr)
+
             self.write_message(nodeid, 'testDuration', report.duration)
             self.write_message(nodeid, 'testOutcome', report.outcome)
 
