@@ -163,6 +163,8 @@ class MultiRun(object):
             except Exception as e:
                 print('Exception from TeamCity testFailed')
                 print(e)
+        if item['report'].get('skipped', False):
+            tc.testIgnored(test_id, item['report'].get('skip_reason', ''), flowId=test_id)
         if bool(item['report']['stdout']):
             try:
                 stdout = ''
@@ -186,7 +188,6 @@ class MultiRun(object):
         tc.testFinished(test_id, testDuration=duration, flowId=test_id)
 
     def message_handler(self, msg):
-        # TODO: Support xfail\xpassed
         msg = self.convert_msg_to_dict(msg)
         if not msg:
             return
@@ -206,6 +207,8 @@ class MultiRun(object):
             rep['duration'] = float(msg['value'])
         elif msg['key'] == 'testOutcome':
             rep['outcome'] = msg['value'].lower()
+        elif msg['key'] == 'testSkipReason':
+            rep['skip_reason'] = msg['value']
         elif msg['key'] == 'testStart':
             # TODO: notify teamcity about test start
             pass
@@ -233,15 +236,25 @@ class MultiRun(object):
                     self.tw.write('F', red=True)
                 else:
                     self.tw.line(s=' F', red=True)
+            elif rep['outcome'] == 'skipped':
+                rep['skipped'] = True
+                if self.config.option.verbose > 0:
+                    self.tw.line(s=' SKIPPED', yellow=True)
+                elif self.config.option.quiet > 0:
+                    self.tw.write('S', yellow=True)
+                else:
+                    self.tw.line(s=' S', yellow=True)
             else:
                 self.tw.line(' ' + rep['outcome'])
-            if rep['outcome'] == 'failed' or rep['outcome'] != 'passed':
+            if rep['outcome'] == 'failed' or (rep['outcome'] != 'passed' and rep['outcome'] != 'skipped'):
                 if bool(rep['crash']) and self.config.option.quiet == 0:
                     self.tw.write(rep['crash'].get('trace', ''))
                     self.tw.line()
                     trace_info = 'Catch at {0}:{1}'.format(rep['crash'].get('path', ''), rep['crash'].get('line'))
                     self.tw.line(s=trace_info)
                     self.tw.sep('_')
+            if rep['outcome'] == 'skipped' and rep['skip_reason'] and self.config.option.verbose > 0:
+                self.tw.line(s='Skip reason "{}"'.format(rep['skip_reason']))
             if self.config.option.verbose > 0:
                 if 'duration' in rep:
                     self.tw.line(s='Test duration {}'.format(rep['duration']))
@@ -411,6 +424,9 @@ class MultiRun(object):
                 # break if setup and call pass
                 if reports[0].passed and reports[1].passed:
                     break
+                # break if test is skipped
+                if reports[0].skipped or reports[1].skipped:
+                    break
             except:
                 # if we get some errors (for example our fixture is breaks), than do nothing
                 pass
@@ -441,6 +457,12 @@ class MultiRun(object):
             # if we fail at setup stage, then write about it
             self.print_crash_info(nodeid, report.longrepr)
             self.write_message(nodeid, 'testOutcome', report.outcome)
+        if report and report.skipped:
+            self.write_message(nodeid, 'testOutcome', report.outcome)
+            if hasattr(report, 'wasxfail'):
+                self.write_message(nodeid, 'testSkipReason', report.wasxfail)
+            else:
+                self.write_message(nodeid, 'testSkipReason', report.longrepr[2])
 
     def handle_call_stage(self, nodeid, report):
         if report:
@@ -448,6 +470,11 @@ class MultiRun(object):
 
             self.write_message(nodeid, 'testDuration', report.duration)
             self.write_message(nodeid, 'testOutcome', report.outcome)
+            if report.skipped:
+                if hasattr(report, 'wasxfail'):
+                    self.write_message(nodeid, 'testSkipReason', report.wasxfail)
+                else:
+                    self.write_message(nodeid, 'testSkipReason', report.longrepr[2])
 
     def handle_teardown_stage(self, nodeid, report):
         if report:
