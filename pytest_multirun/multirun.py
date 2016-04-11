@@ -469,6 +469,10 @@ class MultiRun(object):
             self.print_crash_info(nodeid, report.longrepr)
 
             self.write_message(nodeid, 'testDuration', report.duration)
+            if hasattr(report, 'wasxfail'):
+                # unfortunately, if test pass, but marked as xfail, then outcome is fail.
+                report.outcome = 'skipped'
+
             self.write_message(nodeid, 'testOutcome', report.outcome)
             if report.skipped:
                 if hasattr(report, 'wasxfail'):
